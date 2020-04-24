@@ -304,10 +304,10 @@ static int get_string_property_utf8(IOHIDDeviceRef device, CFStringRef prop, cha
     {
         CFRange range;
         range.location = 0;
-        range.length = len;
+        range.length = CFStringGetLength(str);
         CFIndex used_buf_len;
         CFStringGetBytes(str, range, kCFStringEncodingUTF8, (char)'?', FALSE, (UInt8 *)buf, len, &used_buf_len);
-        buf[len - 1] = 0x00000000;
+        buf[used_buf_len] = 0x00000000;
         return used_buf_len;
     }
     else
@@ -361,23 +361,48 @@ static int make_path(IOHIDDeviceRef device, char *buf, size_t len)
     return res + 1;
 }
 
-static int init_hid_manager(void)
+static int init_hid_manager(unsigned short vendor_id, unsigned short product_id)
 {
     IOReturn res;
+    CFMutableDictionaryRef match = NULL;
+    
+    if (!(vendor_id==0 && product_id==0)) {
+        match = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 0,
+        &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+        
+        int value = vendor_id;
+        CFNumberRef vendor = CFNumberCreate(
+        kCFAllocatorDefault, kCFNumberIntType, &value);
+        CFDictionarySetValue(match, CFSTR(kIOHIDVendorIDKey), vendor);
+        CFRelease(vendor);
+        
+        value = product_id;
+        CFNumberRef product = CFNumberCreate(
+        kCFAllocatorDefault, kCFNumberIntType, &value);
+        CFDictionarySetValue(match, CFSTR(kIOHIDProductIDKey), product);
+        CFRelease(product);
+    } else {
+        printf("Warning, no VID/PID supplied.  MacOS may have permission issues with enumerating all devices.\n");
+    }
 
     /* Initialize all the HID Manager Objects */
     hid_mgr = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-    IOHIDManagerSetDeviceMatching(hid_mgr, NULL);
+    IOHIDManagerSetDeviceMatching(hid_mgr, match);
     IOHIDManagerScheduleWithRunLoop(hid_mgr, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     res = IOHIDManagerOpen(hid_mgr, kIOHIDOptionsTypeNone);
+    
+    CFRelease(match);
+    
     return (res == kIOReturnSuccess) ? 0 : -1;
 }
 
-int HID_API_EXPORT hid_init(void)
+int HID_API_EXPORT hid_init(unsigned short vendor_id, unsigned short product_id)
 {
     if (!hid_mgr)
     {
-        if (init_hid_manager() < 0)
+        if (init_hid_manager(vendor_id, product_id) < 0)
         {
             hid_exit();
             return -1;
@@ -409,7 +434,12 @@ struct hid_device_info HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, u
     setlocale(LC_ALL, "");
 
     /* Set up the HID Manager if it hasn't been done */
-    hid_init();
+    if ( hid_init(vendor_id, product_id) < 0 ) {
+        printf("Error, failed to initialize HID interface.\n");
+        printf("Possible reasons for this:\n");
+        printf("    - Insufficient permissions.  For MacOS, you need to add this binary to 'Input Monitoring' in System Preferences -> Security & Privacy -> Privacy.  This is because blhost uses USB HID.\n");
+        return NULL;
+    }
 
     /* Get a list of the Devices */
     CFSetRef device_set = IOHIDManagerCopyDevices(hid_mgr);
@@ -715,7 +745,7 @@ hid_device *HID_API_EXPORT hid_open_path(const char *path)
     dev = new_hid_device();
 
     /* Set up the HID Manager if it hasn't been done */
-    hid_init();
+    hid_init(0,0);
 
     CFSetRef device_set = IOHIDManagerCopyDevices(hid_mgr);
 

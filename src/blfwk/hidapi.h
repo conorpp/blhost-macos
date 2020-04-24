@@ -93,7 +93,7 @@ struct hid_device_info
     @returns
         This function returns 0 on success and -1 on error.
 */
-int HID_API_EXPORT HID_API_CALL hid_init(void);
+int HID_API_EXPORT HID_API_CALL hid_init(unsigned short, unsigned short);
 
 /** @brief Finalize the HIDAPI library.
 
